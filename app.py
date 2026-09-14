@@ -1,67 +1,134 @@
-from flask import Flask, render_template_string, request, redirect, session
-import json, os, random
+from flask import Flask, render_template_string
+
 app = Flask(__name__)
-app.secret_key = "darwan-pro-final"
-F = "students.json"
-if not os.path.exists(F):
-    open(F, "w").write("[]")
-
-def load():
-    try:
-        return json.load(open(F))
-    except:
-        return []
-
-def save(d):
-    json.dump(d, open(F, "w"), indent=2)
 
 HTML = """
-<body style="background:#0f172a;color:white;font-family:sans-serif;padding:15px">
-<h2>🔒 Darwan PRO</h2>
-<div style="background:#1e293b;padding:15px;border-radius:15px">
-<b>Teacher Class:</b> {{cls}}<br>
-<form method=post action=/setcls style="margin-top:10px"><input name=c value="{{cls}}" style="width:100%;padding:10px"><button style="width:100%;padding:10px;margin-top:5px;background:#2563eb;color:white;border:none;border-radius:8px">Create Class With Gate</button></form>
-<hr>
-<b>Student Join</b><br>
-<form method=post action=/join style="margin-top:10px"><input name=cn placeholder="Class Name" style="width:100%;padding:10px;margin:3px 0"><input name=n placeholder="Your Name" style="width:100%;padding:10px;margin:3px 0"><input name=i placeholder="ID Number" style="width:100%;padding:10px;margin:3px 0"><button style="width:100%;padding:10px;margin-top:5px;background:#16a34a;color:white;border:none;border-radius:8px">Join With ID</button></form>
-<p style="color:#22c55e">{{msg}}</p>
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Darwan - LIVE Class</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family: 'Hind Siliguri', sans-serif;}
+body{background:#0f172a;color:white;}
+.topbar{background:#1e293b;padding:12px 15px;display:flex;align-items:center;gap:10px;position:sticky;top:0;}
+.logo{font-size:18px;}
+.btn{border:none;padding:10px 18px;border-radius:25px;font-weight:bold;cursor:pointer;font-size:14px;}
+.btn-green{background:#22c55e;color:white;}
+.btn-dark{background:#334155;color:#cbd5e1;}
+.card{background:#1e293b;margin:15px;border-radius:15px;padding:15px;}
+.input{width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;margin-bottom:10px;color:#333;}
+.row{display:flex;gap:10px;flex-wrap:wrap;}
+.video-box{background:black;width:100%;height:220px;border-radius:15px;margin-bottom:10px;position:relative;overflow:hidden;}
+video{width:100%;height:100%;object-fit:cover;}
+.small-text{font-size:15px;margin-top:5px;}
+#recordList{margin-top:10px;}
+.rec-item{background:#0f172a;padding:8px;border-radius:8px;margin:5px 0;font-size:13px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo">🔒 Darwan</span>
+  <button class="btn btn-green" onclick="showLive()">LIVE ক্লাস</button>
+  <button class="btn btn-dark" onclick="showRecord()">📼 রেকর্ড দেখো</button>
 </div>
-<div style="border:2px solid #22c55e;padding:15px;border-radius:15px;margin-top:15px">
-<h3>ID Generator - Meye Alada</h3>
-<form method=post action=/gen><input name=name placeholder="Student Name" style="width:100%;padding:10px;margin:3px 0"><input name=roll placeholder="Roll" style="width:100%;padding:10px;margin:3px 0"><select name=g style="width:100%;padding:10px"><option>Female - Meye</option><option>Male - Chele</option></select><button style="width:100%;padding:10px;margin-top:5px;background:#16a34a;color:white;border:none">Generate ID</button></form>
-<p style="color:yellow">New ID: {{gen}}</p>
-{% for s in data %}<div style="background:#0f172a;padding:8px;margin:4px 0;border-radius:8px;font-size:13px">{{s.id}} | {{s.name}} | {{s.g}}</div>{% endfor %}
+
+<div id="livePage">
+  <div class="card">
+    <input id="className" class="input" placeholder="ক্লাসের নাম: Class-10">
+    <div class="row">
+      <button class="btn btn-green" onclick="startClass()">ক্লাস শুরু + 🔴 রেকর্ড চালু</button>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn" style="background:#ef4444;color:white;" onclick="startRec()">🔴 রেকর্ড শুরু</button>
+      <button class="btn btn-dark" onclick="stopRec()">⏹️ রেকর্ড শেষ ও সেভ</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="video-box">
+      <video id="video" autoplay muted playsinline></video>
+    </div>
+    <p class="small-text" id="status">ক্যামেরা চালু করুন</p>
+  </div>
 </div>
+
+<div id="recordPage" style="display:none;">
+  <div class="card">
+    <h3>📼 সেভ করা রেকর্ড</h3>
+    <div id="recordList"><p style="color:#94a3b8;font-size:13px;">এখনো কোনো রেকর্ড নেই</p></div>
+  </div>
+</div>
+
+<script>
+let mediaRecorder;
+let chunks=[];
+let stream;
+let records=[];
+
+async function startClass(){
+ let name=document.getElementById('className').value || 'Class-10';
+ document.getElementById('status').innerText = name + ' - LIVE চলছে...';
+ try{
+   stream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+   document.getElementById('video').srcObject=stream;
+   startRec();
+ }catch(e){ alert('ক্যামেরা চালু করতে পারছি না: '+e); }
+}
+
+function startRec(){
+ if(!stream){ alert('আগে ক্লাস শুরু করুন'); return; }
+ chunks=[];
+ mediaRecorder=new MediaRecorder(stream);
+ mediaRecorder.ondataavailable=e=>chunks.push(e.data);
+ mediaRecorder.onstop=saveRec;
+ mediaRecorder.start();
+ document.getElementById('status').innerText='🔴 রেকর্ড হচ্ছে...';
+}
+
+function stopRec(){
+ if(mediaRecorder && mediaRecorder.state!='inactive'){
+   mediaRecorder.stop();
+   document.getElementById('status').innerText='✅ রেকর্ড সেভ হয়েছে';
+ }
+}
+
+function saveRec(){
+ let blob=new Blob(chunks,{type:'video/webm'});
+ let url=URL.createObjectURL(blob);
+ let name=document.getElementById('className').value || 'Class';
+ let time=new Date().toLocaleString();
+ records.push({url,name,time});
+ renderRecords();
+}
+
+function renderRecords(){
+ let list=document.getElementById('recordList');
+ if(records.length==0) return;
+ list.innerHTML='';
+ records.forEach((r,i)=>{
+   list.innerHTML+=`<div class="rec-item">📌 ${r.name} - ${r.time} <br><a href="${r.url}" download="${r.name}.webm" style="color:#22c55e;">⬇️ ডাউনলোড</a> | <a href="${r.url}" target="_blank" style="color:#38bdf8;">▶️ দেখো</a></div>`;
+ });
+}
+
+function showLive(){
+ document.getElementById('livePage').style.display='block';
+ document.getElementById('recordPage').style.display='none';
+}
+function showRecord(){
+ document.getElementById('livePage').style.display='none';
+ document.getElementById('recordPage').style.display='block';
+}
+</script>
 </body>
+</html>
 """
 
-@app.route("/")
+@app.route('/')
 def home():
-    return render_template_string(HTML, cls=session.get("cls","Class-10 Girls"), msg=session.pop("msg",""), gen=session.pop("gen",""), data=load())
+    return render_template_string(HTML)
 
-@app.route("/setcls", methods=["POST"])
-def setcls():
-    session["cls"] = request.form["c"]
-    session["msg"] = "Class Created: " + request.form["c"]
-    return redirect("/")
-
-@app.route("/gen", methods=["POST"])
-def gen():
-    g = request.form["g"]
-    nid = f"{'G' if 'Female' in g else 'B'}-{random.randint(1000,9999)}-{request.form['roll']}"
-    d = load()
-    d.append({"id": nid, "name": request.form["name"], "roll": request.form["roll"], "g": g})
-    save(d)
-    session["gen"] = nid
-    return redirect("/")
-
-@app.route("/join", methods=["POST"])
-def join():
-    sid = request.form["i"]
-    d = load()
-    ok = [x for x in d if x["id"] == sid]
-    session["msg"] = f"Welcome {ok[0]['name']} Gate Opened!" if ok else "ID Not Found! Sir er theke ID nin"
-    return redirect("/")
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
