@@ -1,6 +1,10 @@
+
 from flask import Flask, render_template_string
+from flask_socketio import SocketIO, emit
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'darwan-secret'
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 HTML = """
 <!DOCTYPE html>
@@ -8,111 +12,166 @@ HTML = """
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Darwan - LIVE Class</title>
+<title>Darwan - LIVE Class + Student Voice</title>
+<script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 <style>
-*{margin:0;padding:0;box-sizing:border-box;font-family: 'Hind Siliguri', sans-serif;}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Hind Siliguri', sans-serif}
 body{background:#0f172a;color:white;}
-.topbar{background:#1e293b;padding:12px 15px;display:flex;align-items:center;gap:10px;position:sticky;top:0;}
-.logo{font-size:18px;}
-.btn{border:none;padding:10px 18px;border-radius:25px;font-weight:bold;cursor:pointer;font-size:14px;}
+.topbar{background:#1e293b;padding:12px 15px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-size:18px;font-weight:bold}
+.btn{border:none;padding:10px 18px;border-radius:25px;font-weight:bold;cursor:pointer}
 .btn-green{background:#22c55e;color:white;}
 .btn-dark{background:#334155;color:#cbd5e1;}
 .card{background:#1e293b;margin:15px;border-radius:15px;padding:15px;}
-.input{width:100%;padding:12px;border-radius:10px;border:none;font-size:14px;margin-bottom:10px;color:#333;}
-.row{display:flex;gap:10px;flex-wrap:wrap;}
-.video-box{background:black;width:100%;height:220px;border-radius:15px;margin-bottom:10px;position:relative;overflow:hidden;}
-video{width:100%;height:100%;object-fit:cover;}
-.small-text{font-size:15px;margin-top:5px;}
-#recordList{margin-top:10px;}
-.rec-item{background:#0f172a;padding:8px;border-radius:8px;margin:5px 0;font-size:13px;}
+.input{width:100%;padding:12px;border-radius:10px;border:none;font-size:16px;margin:8px 0}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+#livePage, #recordPage{display:none}
+video{width:100%;border-radius:12px;background:black;max-height:400px}
+.ask-btn{background:#ff9800;color:white;padding:12px 20px;border:none;border-radius:10px;font-size:16px;width:100%;margin-top:10px}
+.req-box{background:#fff3cd;color:#333;padding:10px;margin:5px 0;border-radius:8px}
 </style>
 </head>
 <body>
-
 <div class="topbar">
-  <span class="logo">🔒 Darwan</span>
-  <button class="btn btn-green" onclick="showLive()">LIVE ক্লাস</button>
-  <button class="btn btn-dark" onclick="showRecord()">📼 রেকর্ড দেখো</button>
+  <div class="logo">🔴 Darwan LIVE Pro</div>
+  <div id="userInfo"></div>
 </div>
 
-<div id="livePage">
-  <div class="card">
-    <input id="className" class="input" placeholder="ক্লাসের নাম: Class-10">
-    <div class="row">
-      <button class="btn btn-green" onclick="startClass()">ক্লাস শুরু + 🔴 রেকর্ড চালু</button>
-    </div>
-    <div class="row" style="margin-top:10px;">
-      <button class="btn" style="background:#ef4444;color:white;" onclick="startRec()">🔴 রেকর্ড শুরু</button>
-      <button class="btn btn-dark" onclick="stopRec()">⏹️ রেকর্ড শেষ ও সেভ</button>
-    </div>
-  </div>
+<div id="gatePage" class="card">
+  <h2>🔐 ID দিয়ে প্রবেশ করুন</h2>
+  <input id="studentId" class="input" placeholder="আপনার ID লিখুন (যেমন: 12345)">
+  <button class="btn btn-green" onclick="checkId()">প্রবেশ করুন</button>
+</div>
 
-  <div class="card">
-    <div class="video-box">
-      <video id="video" autoplay muted playsinline></video>
-    </div>
-    <p class="small-text" id="status">ক্যামেরা চালু করুন</p>
+<div id="examPage" class="card" style="display:none">
+  <h2>📝 ভর্তি পরীক্ষা</h2>
+  <p>২ টা প্রশ্নের উত্তর দিন</p>
+  <p>১. বাংলাদেশের রাজধানী কি?</p>
+  <input id="q1" class="input" placeholder="উত্তর">
+  <p>২. 2+2 = ?</p>
+  <input id="q2" class="input" placeholder="উত্তর">
+  <button class="btn btn-green" onclick="submitExam()">জমা দিন</button>
+</div>
+
+<div id="livePage" class="card">
+  <h2>🔴 LIVE ক্লাস চলছে</h2>
+  <div id="teacherRequests"></div>
+  <video id="localVideo" autoplay muted playsinline></video>
+  <video id="remoteVideo" autoplay playsinline style="display:none"></video>
+  <div class="row">
+    <button class="btn btn-green" onclick="startCamera()">📷 ক্যামেরা চালু + রেকর্ড চালু</button>
+    <button class="btn btn-dark" onclick="showRecord()">📁 রেকর্ড দেখুন</button>
+  </div>
+  
+  <!-- ছাত্রদের জন্য প্রশ্ন বাটন -->
+  <div id="studentPanel">
+    <button id="askBtn" class="ask-btn" onclick="askQuestion()">🎤 প্রশ্ন করতে চাই</button>
+    <p style="font-size:12px;text-align:center;margin-top:5px;color:#94a3b8">বাটন চাপলে স্যারের কাছে অনুরোধ যাবে</p>
   </div>
 </div>
 
-<div id="recordPage" style="display:none;">
-  <div class="card">
-    <h3>📼 সেভ করা রেকর্ড</h3>
-    <div id="recordList"><p style="color:#94a3b8;font-size:13px;">এখনো কোনো রেকর্ড নেই</p></div>
-  </div>
+<div id="recordPage" class="card">
+  <h2>📁 রেকর্ডেড ক্লাস</h2>
+  <div id="recordList"></div>
+  <button class="btn btn-dark" onclick="showLive()">🔙 Live এ ফিরে যান</button>
 </div>
 
 <script>
-let mediaRecorder;
-let chunks=[];
-let stream;
-let records=[];
+let isTeacher = false;
+let currentStudentName = localStorage.getItem('darwan_name') || 'ছাত্র';
+let records = JSON.parse(localStorage.getItem('records')||'[]');
+const socket = io();
 
-async function startClass(){
- let name=document.getElementById('className').value || 'Class-10';
- document.getElementById('status').innerText = name + ' - LIVE চলছে...';
- try{
-   stream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
-   document.getElementById('video').srcObject=stream;
-   startRec();
- }catch(e){ alert('ক্যামেরা চালু করতে পারছি না: '+e); }
+let studentMicStream = null;
+let isTeacherMode = false;
+
+// ID Check
+function checkId(){
+  let id = document.getElementById('studentId').value;
+  if(!id){ alert('ID লিখুন'); return; }
+  currentStudentName = id;
+  localStorage.setItem('darwan_name', id);
+  if(id.toLowerCase().includes('teacher') || id=='admin' || id=='100'){
+    isTeacher = true;
+    isTeacherMode = true;
+    alert('স্যার, আপনি টিচার হিসেবে প্রবেশ করেছেন - ছাত্ররা প্রশ্ন করলে এখানে দেখতে পাবেন');
+  }
+  document.getElementById('gatePage').style.display='none';
+  document.getElementById('examPage').style.display='block';
 }
 
-function startRec(){
- if(!stream){ alert('আগে ক্লাস শুরু করুন'); return; }
- chunks=[];
- mediaRecorder=new MediaRecorder(stream);
- mediaRecorder.ondataavailable=e=>chunks.push(e.data);
- mediaRecorder.onstop=saveRec;
- mediaRecorder.start();
- document.getElementById('status').innerText='🔴 রেকর্ড হচ্ছে...';
+function submitExam(){
+  let q1 = document.getElementById('q1').value.toLowerCase();
+  let q2 = document.getElementById('q2').value;
+  if((q1.includes('dhaka') || q1.includes('ঢাকা')) && q2=='4'){
+    document.getElementById('examPage').style.display='none';
+    document.getElementById('livePage').style.display='block';
+    document.getElementById('userInfo').innerText = currentStudentName + (isTeacher?' (Teacher)':'');
+    if(isTeacher){
+      document.getElementById('studentPanel').style.display='none';
+    }
+  }else{
+    alert('একটা ভুল হয়েছে, আবার চেষ্টা করুন');
+  }
 }
 
-function stopRec(){
- if(mediaRecorder && mediaRecorder.state!='inactive'){
-   mediaRecorder.stop();
-   document.getElementById('status').innerText='✅ রেকর্ড সেভ হয়েছে';
- }
+async function startCamera(){
+  try{
+    let stream = await navigator.mediaDevices.getUserMedia({video:true, audio:true});
+    document.getElementById('localVideo').srcObject = stream;
+  }catch(e){
+    alert('ক্যামেরা চালু করতে Allow দিন - ব্রাউজারের তালা আইকনে চাপ দিয়ে Camera Allow করুন');
+  }
 }
 
-function saveRec(){
- let blob=new Blob(chunks,{type:'video/webm'});
- let url=URL.createObjectURL(blob);
- let name=document.getElementById('className').value || 'Class';
- let time=new Date().toLocaleString();
- records.push({url,name,time});
- renderRecords();
+// === নতুন ফিচার: ছাত্র প্রশ্ন ===
+function askQuestion(){
+  if(!studentMicStream){
+    navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
+      studentMicStream = stream;
+      socket.emit('student-raise-hand', {name: currentStudentName});
+      document.getElementById('askBtn').innerText = '⏳ স্যারের অনুমতির অপেক্ষায়...';
+      document.getElementById('askBtn').style.background='#64748b';
+    }).catch(()=>{
+      alert('মাইক্রোফোন Allow করুন');
+    });
+  }
 }
+
+function allowStudent(name){
+  socket.emit('allow-student', {name: name});
+  let el = document.getElementById('req-'+name);
+  if(el) el.remove();
+  alert(name + ' কে অনুমতি দেওয়া হয়েছে');
+}
+
+socket.on('student-raise-hand', (data)=>{
+  if(isTeacher){
+    let box = document.getElementById('teacherRequests');
+    box.innerHTML += `<div id="req-${data.name}" class="req-box">
+      📢 <b>${data.name}</b> প্রশ্ন করতে চায় 
+      <button onclick="allowStudent('${data.name}')" style="background:green;color:white;padding:5px 12px;border:none;border-radius:5px;margin-left:10px">Allow 🎤</button>
+    </div>`;
+  }
+});
+
+socket.on('teacher-allowed', (data)=>{
+  if(data.name == currentStudentName){
+    alert('🎤 স্যার আপনাকে কথা বলার অনুমতি দিয়েছেন! এখন মাইক চালু আছে, প্রশ্ন করুন');
+    document.getElementById('askBtn').innerText = '🎤 মাইক চালু - কথা বলুন';
+    document.getElementById('askBtn').style.background='#22c55e';
+    // এখানে চাইলে WebRTC দিয়ে ভয়েস সবার কাছে পাঠানো যাবে
+  }
+});
 
 function renderRecords(){
  let list=document.getElementById('recordList');
  if(records.length==0) return;
  list.innerHTML='';
  records.forEach((r,i)=>{
-   list.innerHTML+=`<div class="rec-item">📌 ${r.name} - ${r.time} <br><a href="${r.url}" download="${r.name}.webm" style="color:#22c55e;">⬇️ ডাউনলোড</a> | <a href="${r.url}" target="_blank" style="color:#38bdf8;">▶️ দেখো</a></div>`;
+   list.innerHTML+=`<div class="req-box">📌 ${r.name} - ${r.time}<br><video src="${r.url}" controls style="width:100%;margin-top:5px"></video></div>`;
  });
 }
-
 function showLive(){
  document.getElementById('livePage').style.display='block';
  document.getElementById('recordPage').style.display='none';
@@ -120,6 +179,7 @@ function showLive(){
 function showRecord(){
  document.getElementById('livePage').style.display='none';
  document.getElementById('recordPage').style.display='block';
+ renderRecords();
 }
 </script>
 </body>
@@ -130,5 +190,13 @@ function showRecord(){
 def home():
     return render_template_string(HTML)
 
+@socketio.on('student-raise-hand')
+def handle_raise(data):
+    emit('student-raise-hand', data, broadcast=True)
+
+@socketio.on('allow-student')
+def handle_allow(data):
+    emit('teacher-allowed', data, broadcast=True)
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    socketio.run(app, host='0.0.0.0', port=5000)
